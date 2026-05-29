@@ -1,4 +1,4 @@
-/* Better Election Maps – better-maps/tooltip.js
+﻿/* Better Election Maps â€“ better-maps/tooltip.js
    NBC Decision Desk refresh
    Adds: county trend arrows, PVI-based battleground badges, key race indicators. */
 
@@ -111,6 +111,18 @@
         }
     };
 
+    const getMunicipalityReportingRatio = (muniId, meta, source, live) => {
+        if(!live || !source) return 1;
+        const statewideRatio = Math.max(0, Math.min(1, safeNum(source.reportingRatio, 1)));
+        if(statewideRatio >= 0.999) return 1;
+
+        const turnoutWeight = Math.max(0.35, Math.min(2.4, safeNum(meta.turnoutWeight, 1)));
+        const sizeDelay = Math.max(-0.10, Math.min(0.22, (turnoutWeight - 1) * 0.18));
+        const hash = String(muniId || "").split("").reduce((sum, char) => sum + char.charCodeAt(0), 0);
+        const jitter = ((hash % 19) - 9) / 100;
+        return Math.max(0, Math.min(0.99, statewideRatio - sizeDelay + jitter));
+    };
+
     const getMunicipalitySyntheticDistrict = (muniId, electionType, live) => {
         const stateKey = String(activeMap || "").toUpperCase();
         const stateData = municipalityShiftData[stateKey];
@@ -133,7 +145,7 @@
         const demVotes = hasDemocrat ? Math.floor(turnout * demShare) : 0;
         const repVotes = Math.floor(turnout * repShare);
         const indVotes = Math.floor(turnout * finalIndShare);
-        const reportingRatio = (!live || !source) ? 1 : Math.max(0, Math.min(1, source.reportingRatio));
+        const reportingRatio = getMunicipalityReportingRatio(muniId, meta, source, live);
         const currentTurnout = Math.floor(turnout * reportingRatio);
         const demCurrentVotes = Math.floor(demVotes * reportingRatio);
         const repCurrentVotes = Math.floor(repVotes * reportingRatio);
@@ -153,7 +165,7 @@
             name: meta.displayName || muniId,
             totalVotes: turnout,
             totalCurrVotes: currentTurnout,
-            pW: !live || reportingRatio >= 1,
+            pW: !live || reportingRatio >= 0.999,
             cands
         };
     };
@@ -208,8 +220,17 @@
         return { value: abs, label, party, raw: diff };
     };
 
-    const candidateVotes = (cand, live) => safeNum(live ? cand.currentVotes : cand.votes);
-    const districtVotes = (district, live) => safeNum(live ? district.totalCurrVotes : district.totalVotes);
+    const getCandidateLiveVotes = (cand) => {
+        if(!cand) return undefined;
+        const possible = [cand.currentVotes, cand.currVotes, cand.currentVote, cand.liveVotes, cand.reportingVotes];
+        for(let i = 0; i < possible.length; i++){
+            if(possible[i] !== undefined && possible[i] !== null) return possible[i];
+        }
+        return undefined;
+    };
+
+    const candidateVotes = (cand, live) => safeNum(live ? getCandidateLiveVotes(cand) : cand.votes, safeNum(cand.votes));
+    const districtVotes = (district, live) => safeNum(live ? district.totalCurrVotes : district.totalVotes, safeNum(district.totalVotes));
 
     const sortedCandidates = (district, live) => {
         if(!district || !district.cands) return [];
@@ -287,9 +308,37 @@
         return parts.length > 1 ? parts[parts.length - 1] : parts[0];
     };
 
+    const getPrimaryCandidateName = (cand) => {
+        if(!cand || !cand.name) return "Unknown";
+        const parts = String(cand.name).trim().split(/\s+/);
+        if(parts.length <= 1) return parts[0];
+        const initials = parts.slice(0, -1)
+            .filter(part => part.length > 0)
+            .map(part => `${part.charAt(0).toUpperCase()}.`)
+            .join(" ");
+        return `${initials} ${parts[parts.length - 1]}`.trim();
+    };
+
     const getCandidateAnimationKey = (cand) => {
         if(!cand) return "unknown";
         return `${getPartyKey(cand)}:${String(cand.name || "").toLowerCase()}`;
+    };
+
+    const candidateHasWinFlag = (cand) => {
+        if(!cand) return false;
+        return cand.pW === true
+            || cand.winner === true
+            || cand.won === true
+            || cand.advanced === true
+            || cand.advance === true
+            || cand.advances === true
+            || cand.nominated === true
+            || cand.nominee === true
+            || cand.primaryWinner === true
+            || cand.runoff === true
+            || cand.inRunoff === true
+            || cand.topTwo === true
+            || cand.topFour === true;
     };
 
     const getPartyLabel = (cand) => {
@@ -303,6 +352,259 @@
         if(party === "d") return "party-d";
         if(party === "r") return "party-r";
         return "party-i";
+    };
+
+    const getHouseVotePartyKey = (cand) => {
+        if(!cand) return "I";
+        const party = String(cand.party || "").charAt(0).toUpperCase();
+        if(party === "D" || party === "R") return party;
+        const caucus = String(cand.caucus || cand.caucusParty || "").toLowerCase();
+        if(caucus.charAt(0) === "d" || caucus.indexOf("dem") !== -1) return "D";
+        if(caucus.charAt(0) === "r" || caucus.indexOf("rep") !== -1) return "R";
+        return "I";
+    };
+
+    const normalizeCandidateText = (value) => String(value || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+    const candidateImageCache = {};
+    const candidateImageMissCache = {};
+
+    const getCandidateCacheKey = (cand) => {
+        const props = tooltipComponents && tooltipComponents.properties ? tooltipComponents.properties : {};
+        return `${props.electionType || ""}:${props.districtId || ""}:${activeMap || ""}:${normalizeCandidateText(cand && cand.name)}:${getPartyLabel(cand).charAt(0)}`;
+    };
+
+    const getDirectCandidateImageSrc = (obj) => {
+        if(!obj) return "";
+        const possible = [
+            obj.image,
+            obj.img,
+            obj.photo,
+            obj.picture,
+            obj.portrait,
+            obj.portraitPath,
+            obj.imagePath,
+            obj.photoPath,
+            obj.profileImage,
+            obj.profilePic,
+            obj.face,
+            obj.avatar,
+            obj.headshot,
+            obj.headshotPath
+        ];
+        for(let i = 0; i < possible.length; i++){
+            if(typeof possible[i] === "string" && possible[i].trim().length > 0) return possible[i];
+        }
+        return "";
+    };
+
+    const elementBelongsToTooltip = (elem) => {
+        let current = elem;
+        while(current){
+            if(current === tooltipDiv) return true;
+            current = current.parentElement;
+        }
+        return false;
+    };
+
+    const candidateTextScore = (text, cand) => {
+        const normalizedText = normalizeCandidateText(text);
+        const normalizedName = normalizeCandidateText(cand && cand.name);
+        if(!normalizedText || !normalizedName) return 0;
+        if(normalizedText.indexOf(normalizedName) !== -1) return 100;
+        const parts = String(cand.name || "").trim().split(/\s+/).filter(Boolean);
+        if(parts.length === 0) return 0;
+        const lastName = normalizeCandidateText(parts[parts.length - 1]);
+        const firstName = normalizeCandidateText(parts[0]);
+        if(!lastName || normalizedText.indexOf(lastName) === -1) return 0;
+        if(parts.length === 1) return 70;
+        if(firstName && normalizedText.indexOf(firstName) !== -1) return 85;
+        const initial = firstName ? firstName.charAt(0) : "";
+        if(initial && normalizedText.indexOf(initial + lastName) !== -1) return 80;
+        return 0;
+    };
+
+    const textMatchesCandidate = (text, cand) => candidateTextScore(text, cand) >= 80;
+
+    const isPortraitSizedElement = (elem) => {
+        if(!elem || !elem.getBoundingClientRect) return false;
+        const rect = elem.getBoundingClientRect();
+        if(rect.width < 35 || rect.height < 35 || rect.width > 190 || rect.height > 210) return false;
+        const ratio = rect.width / Math.max(1, rect.height);
+        return ratio >= 0.45 && ratio <= 1.55;
+    };
+
+    const getNearbyText = (elem) => {
+        let current = elem;
+        for(let depth = 0; current && depth < 7; depth++){
+            let text = current.innerText || current.textContent || "";
+            if(text && text.trim().length > 260) text = "";
+            if((!text || text.trim().length === 0) && current.parentElement){
+                const siblings = Array.from(current.parentElement.children || []);
+                const index = siblings.indexOf(current);
+                const nearby = [];
+                if(index > 0) nearby.push(siblings[index - 1]);
+                if(index >= 0 && index < siblings.length - 1) nearby.push(siblings[index + 1]);
+                text = nearby.map(node => node.innerText || node.textContent || "").join(" ");
+                if(text && text.trim().length > 260) text = "";
+            }
+            if(text && text.trim().length > 0) return text;
+            current = current.parentElement;
+        }
+        return "";
+    };
+
+    const extractBackgroundImageUrl = (elem) => {
+        if(!elem) return "";
+        const bg = elem.style && elem.style.backgroundImage ? elem.style.backgroundImage : "";
+        const match = /url\((['"]?)(.*?)\1\)/.exec(bg);
+        return match && match[2] ? match[2] : "";
+    };
+
+    const getCandidateImageFromPage = (cand) => {
+        if(!cand || !cand.name || typeof document === "undefined") return "";
+
+        const imgs = Array.from(document.getElementsByTagName("img"));
+        let bestSrc = "";
+        let bestScore = 0;
+        for(let i = 0; i < imgs.length; i++){
+            const img = imgs[i];
+            if(elementBelongsToTooltip(img)) continue;
+            if(!isPortraitSizedElement(img)) continue;
+            const src = img.currentSrc || img.src || img.getAttribute("src") || img.getAttribute("data-src") || "";
+            const score = candidateTextScore(getNearbyText(img), cand);
+            if(src && score > bestScore){
+                bestScore = score;
+                bestSrc = src;
+            }
+        }
+        if(bestSrc && bestScore >= 80) return bestSrc;
+
+        const elems = Array.from(document.querySelectorAll("[style]"));
+        for(let i = 0; i < elems.length; i++){
+            const elem = elems[i];
+            if(elementBelongsToTooltip(elem)) continue;
+            if(!isPortraitSizedElement(elem)) continue;
+            const src = extractBackgroundImageUrl(elem);
+            const score = candidateTextScore(getNearbyText(elem), cand);
+            if(src && score > bestScore){
+                bestScore = score;
+                bestSrc = src;
+            }
+        }
+        if(bestSrc && bestScore >= 80) return bestSrc;
+
+        const canvases = Array.from(document.getElementsByTagName("canvas"));
+        for(let i = 0; i < canvases.length; i++){
+            const canvas = canvases[i];
+            if(elementBelongsToTooltip(canvas)) continue;
+            if(!isPortraitSizedElement(canvas)) continue;
+            const score = candidateTextScore(getNearbyText(canvas), cand);
+            if(score < 80) continue;
+            try {
+                const src = canvas.toDataURL("image/png");
+                if(src) return src;
+            } catch(err) {}
+        }
+
+        return "";
+    };
+
+    const getCandidateImageFromGameData = (cand) => {
+        return "";
+        if(!cand || !cand.name) return "";
+        const seen = [];
+        const party = getPartyLabel(cand).charAt(0);
+
+        const searchObj = (obj, depth) => {
+            if(!obj || depth > 6) return "";
+            if(typeof obj !== "object") return "";
+            if(seen.indexOf(obj) !== -1) return "";
+            seen.push(obj);
+
+            const direct = getDirectCandidateImageSrc(obj);
+            const objParty = String(obj.party || obj.caucus || obj.caucusParty || "").charAt(0);
+            if(direct && textMatchesCandidate(String(obj.name || obj.fullName || obj.firstName + " " + obj.lastName || ""), cand)
+                && (!party || !objParty || objParty.toUpperCase() === party.toUpperCase())){
+                return direct;
+            }
+
+            const keys = Object.keys(obj);
+            for(let i = 0; i < keys.length; i++){
+                const key = keys[i];
+                if(key === "parentElement" || key === "children" || key === "ownerDocument") continue;
+                const found = searchObj(obj[key], depth + 1);
+                if(found) return found;
+            }
+            return "";
+        };
+
+        try {
+            if(typeof Executive !== "undefined" && Executive.data){
+                return searchObj(Executive.data.politicians, 0) || searchObj(Executive.data, 0);
+            }
+        } catch(err) {}
+        return "";
+    };
+
+    const getCandidateImageSrc = (cand) => {
+        if(!cand) return "";
+        const cacheKey = getCandidateCacheKey(cand);
+        if(candidateImageCache[cacheKey]) return candidateImageCache[cacheKey];
+        if(candidateImageMissCache[cacheKey] && Date.now() - candidateImageMissCache[cacheKey] < 2500) return "";
+
+        const direct = getDirectCandidateImageSrc(cand);
+        if(direct){
+            candidateImageCache[cacheKey] = direct;
+            return direct;
+        }
+        if(cand.politician){
+            const src = getCandidateImageSrc(cand.politician);
+            if(src){
+                candidateImageCache[cacheKey] = src;
+                return src;
+            }
+        }
+        if(cand.pol){
+            const src = getCandidateImageSrc(cand.pol);
+            if(src){
+                candidateImageCache[cacheKey] = src;
+                return src;
+            }
+        }
+        const dataSrc = getCandidateImageFromGameData(cand);
+        if(dataSrc){
+            candidateImageCache[cacheKey] = dataSrc;
+            return dataSrc;
+        }
+        const pageSrc = getCandidateImageFromPage(cand);
+        if(pageSrc) candidateImageCache[cacheKey] = pageSrc;
+        else candidateImageMissCache[cacheKey] = Date.now();
+        return pageSrc;
+    };
+
+    const createCandidatePortrait = (cand) => {
+        const slot = document.createElement("div");
+        slot.className = `bm-nbc-portrait ${getPartyClass(cand)}`;
+
+        const imageSrc = getCandidateImageSrc(cand);
+        if(imageSrc){
+            const img = document.createElement("img");
+            img.className = "bm-nbc-portrait-img";
+            img.src = imageSrc;
+            img.onerror = () => {
+                slot.classList.add("no-portrait");
+                img.remove();
+            };
+            slot.appendChild(img);
+        } else {
+            slot.classList.add("no-portrait");
+        }
+
+        const label = document.createElement("span");
+        label.className = "bm-nbc-portrait-party";
+        label.innerText = getPartyLabel(cand).charAt(0) || "?";
+        slot.appendChild(label);
+        return slot;
     };
 
     const makeBadge = (text, className) => {
@@ -581,9 +883,9 @@
         const indDelta = indShare - pvi.expectedI;
 
         const possible = [];
-        if(demDelta >= threshold) possible.push({ arrow: "←", label: "BLUE", delta: demDelta, className: "trend-blue" });
-        if(repDelta >= threshold) possible.push({ arrow: "→", label: "RED", delta: repDelta, className: "trend-red" });
-        if(indShare >= 30 && indDelta >= threshold) possible.push({ arrow: "▲", label: "GRAY", delta: indDelta, className: "trend-gray" });
+        if(demDelta >= threshold) possible.push({ arrow: "â†", label: "BLUE", delta: demDelta, className: "trend-blue" });
+        if(repDelta >= threshold) possible.push({ arrow: "â†’", label: "RED", delta: repDelta, className: "trend-red" });
+        if(indShare >= 30 && indDelta >= threshold) possible.push({ arrow: "â–²", label: "GRAY", delta: indDelta, className: "trend-gray" });
 
         if(possible.length === 0) return null;
         possible.sort((a, b) => b.delta - a.delta);
@@ -645,19 +947,20 @@
         if(indicatorRow.children.length > 0) tooltipComponents.meta.appendChild(indicatorRow);
     };
 
-    const createTooltipEntry = (cand, district, live, winner) => {
+    const createTooltipEntry = (cand, district, live, winner, primary) => {
         const row = document.createElement("div");
         row.className = `bm-nbc-row ${cand === winner ? "is-winner" : ""}`;
         row.setAttribute("data-candidate-key", getCandidateAnimationKey(cand));
 
-        const party = document.createElement("div");
-        party.className = `bm-nbc-party ${getPartyClass(cand)}`;
-        party.innerText = getPartyLabel(cand).charAt(0) || "?";
-        row.appendChild(party);
+        row.appendChild(createCandidatePortrait(cand));
 
         const name = document.createElement("div");
         name.className = "bm-nbc-name";
-        name.innerText = getCandidateLastName(cand);
+        name.innerText = primary ? getPrimaryCandidateName(cand) : getCandidateLastName(cand);
+        const nameParty = document.createElement("span");
+        nameParty.className = `bm-nbc-name-party ${getPartyClass(cand)}`;
+        nameParty.innerText = getPartyLabel(cand).charAt(0) || "?";
+        name.appendChild(nameParty);
         if(cand.incumbent === true){
             const inc = document.createElement("span");
             inc.className = "bm-nbc-incumbent";
@@ -692,10 +995,10 @@
         pctWrap.appendChild(barTrack);
         row.appendChild(pctWrap);
 
-        if(cand === winner){
+        if(cand === winner || candidateHasWinFlag(cand)){
             const check = document.createElement("span");
             check.className = "bm-nbc-check";
-            check.innerText = "✔";
+            check.textContent = "\u2714";
             name.appendChild(check);
         }
 
@@ -711,7 +1014,10 @@
             if(!key) return;
             positions[key] = {
                 top: row.getBoundingClientRect().top,
-                index
+                index,
+                barWidth: row.querySelector(".bm-nbc-bar") ? row.querySelector(".bm-nbc-bar").style.width : "",
+                votesText: row.querySelector(".bm-nbc-votes") ? row.querySelector(".bm-nbc-votes").innerText : "",
+                pctText: row.querySelector(".bm-nbc-pct") ? row.querySelector(".bm-nbc-pct").innerText : ""
             };
         });
         return positions;
@@ -723,46 +1029,190 @@
             if(!row.getAttribute) return;
             const key = row.getAttribute("data-candidate-key");
             if(!key || !previousPositions[key]) return;
+            const previous = previousPositions[key];
 
-            const oldTop = previousPositions[key].top;
+            const oldTop = previous.top;
             const newTop = row.getBoundingClientRect().top;
             const deltaY = oldTop - newTop;
-            if(Math.abs(deltaY) < 1) return;
+            const bar = row.querySelector(".bm-nbc-bar");
+            const votes = row.querySelector(".bm-nbc-votes");
+            const pct = row.querySelector(".bm-nbc-pct");
+            const targetBarWidth = bar ? bar.style.width : "";
+            const valueChanged = (votes && previous.votesText !== votes.innerText) || (pct && previous.pctText !== pct.innerText);
 
-            if(previousPositions[key].index > index) row.classList.add("is-gaining-position");
-            row.style.transform = `translateY(${deltaY}px)`;
+            if(previous.index > index) row.classList.add("is-gaining-position");
             row.style.transition = "none";
+            if(Math.abs(deltaY) >= 1) row.style.transform = `translateY(${deltaY}px)`;
+            if(bar && previous.barWidth && previous.barWidth !== targetBarWidth){
+                bar.style.transition = "none";
+                bar.style.width = previous.barWidth;
+            }
             row.getBoundingClientRect();
             requestAnimationFrame(() => {
-                row.style.transition = "transform 520ms cubic-bezier(.16,.84,.24,1), background-color 360ms ease, box-shadow 360ms ease";
+                row.style.transition = "transform 720ms cubic-bezier(.16,.84,.24,1), background-color 460ms ease, box-shadow 460ms ease";
                 row.style.transform = "translateY(0)";
+                if(bar){
+                    bar.style.transition = "width 760ms cubic-bezier(.16,.84,.24,1), background-color 420ms ease";
+                    bar.style.width = targetBarWidth;
+                }
+                if(valueChanged){
+                    row.classList.remove("is-value-updated");
+                    row.getBoundingClientRect();
+                    row.classList.add("is-value-updated");
+                }
             });
         });
     };
 
-    const createCandidateTable = (district, live, primary) => {
-        const stats = getRaceStats(district, live);
-        const winner = (district._countyView === true) ? null : ((district.pW === true || !live) ? stats.leader : null);
-        stats.cands.forEach(candidate => tooltipComponents.entries.appendChild(createTooltipEntry(candidate, district, live, winner)));
+    const appendHiddenCandidateCount = (count) => {
+        if(count <= 0) return;
+        const more = document.createElement("div");
+        more.className = "bm-nbc-more-candidates";
+        more.innerText = `+ ${count} MORE CANDIDATE${count === 1 ? "" : "S"}`;
+        tooltipComponents.entries.appendChild(more);
     };
 
-    const buildPartyPrimaryBlock = (label, className, cands, live) => {
+    const createCandidateTable = (district, live, primary) => {
+        const stats = getRaceStats(district, live);
+        const flaggedWinner = stats.cands.filter(candidateHasWinFlag)[0] || null;
+        const winner = (district._countyView === true) ? null : (flaggedWinner || ((district.pW === true || !live) ? stats.leader : null));
+        const maxRows = primary ? 4 : 3;
+        stats.cands.slice(0, maxRows).forEach(candidate => tooltipComponents.entries.appendChild(createTooltipEntry(candidate, district, live, winner, primary)));
+        appendHiddenCandidateCount(stats.cands.length - maxRows);
+    };
+
+    const getPrimaryDisplayCands = (cands, live) => {
+        return (cands || []).map(cand => {
+            const clone = Object.assign({}, cand);
+            if(live && getCandidateLiveVotes(clone) === undefined) clone.currentVotes = 0;
+            return clone;
+        });
+    };
+
+    const buildPartyPrimaryBlock = (label, className, cands, live, parentDistrict) => {
         if(!cands || cands.length === 0) return;
         const header = document.createElement("div");
         header.className = `bm-nbc-primary-header ${className}`;
         header.innerText = label;
         tooltipComponents.entries.appendChild(header);
 
-        const total = cands.reduce((sum, c) => sum + candidateVotes(c, live), 0);
-        const fakeDistrict = { totalVotes: total, totalCurrVotes: total, cands, pW: false };
+        const displayCands = getPrimaryDisplayCands(cands, live);
+        const total = displayCands.reduce((sum, c) => sum + candidateVotes(c, live), 0);
+        const finalTotal = cands.reduce((sum, c) => sum + candidateVotes(c, false), 0);
+        const fullyReported = finalTotal > 0 && total >= finalTotal;
+        const parentProjected = parentDistrict && (parentDistrict.pW === true || parentDistrict.projected === true || parentDistrict.final === true);
+        const fakeDistrict = {
+            totalVotes: finalTotal,
+            totalCurrVotes: total,
+            cands: displayCands,
+            pW: displayCands.some(candidateHasWinFlag) || parentProjected || (!live && finalTotal > 0) || (live && fullyReported)
+        };
         createCandidateTable(fakeDistrict, live, true);
+    };
+
+    const getPrimaryBlockParty = (block) => {
+        const label = String(block && block.label || "").toLowerCase();
+        const className = String(block && block.className || "").toLowerCase();
+        if(label.indexOf("democratic") !== -1 || className.indexOf("dem") !== -1) return "D";
+        if(label.indexOf("republican") !== -1 || className.indexOf("rep") !== -1) return "R";
+        return "N";
+    };
+
+    const primaryPartyTotal = (block, live) => {
+        if(!block || !block.cands) return 0;
+        return getPrimaryDisplayCands(block.cands, live).reduce((sum, cand) => sum + candidateVotes(cand, live), 0);
+    };
+
+    const appendPrimaryTurnoutFooter = (district, live) => {
+        const blocks = getPrimaryBlocks(district);
+        const totals = { D: 0, R: 0, N: 0 };
+        blocks.forEach(block => {
+            totals[getPrimaryBlockParty(block)] += primaryPartyTotal(block, live);
+        });
+        const primaryInfo = getPrimaryAdvanceInfo(activeMap, district);
+        const nonpartisanTotal = totals.N > 0 ? totals.N : totals.D + totals.R;
+        const pieces = [];
+
+        if(primaryInfo.nonpartisan || (totals.D === 0 && totals.R === 0)){
+            pieces.push(`TURNOUT: ${formatNumber(nonpartisanTotal)}`);
+        } else {
+            if(totals.D > 0) pieces.push(`D TURNOUT: ${formatNumber(totals.D)}`);
+            if(totals.R > 0) pieces.push(`R TURNOUT: ${formatNumber(totals.R)}`);
+            if(totals.N > 0) pieces.push(`NONPARTISAN TURNOUT: ${formatNumber(totals.N)}`);
+        }
+        if(pieces.length === 0) return;
+        const footer = document.createElement("div");
+        footer.className = "bm-nbc-turnout-footer";
+        footer.innerText = pieces.join("   ");
+        tooltipComponents.entries.appendChild(footer);
+    };
+
+    const getPrimaryBlocks = (district) => {
+        const blocks = [];
+        const used = [];
+        const getBlockCands = (value) => {
+            if(!value) return null;
+            if(Array.isArray(value.cands)) return value.cands;
+            if(Array.isArray(value.candidates)) return value.candidates.map(c => {
+                const clone = Object.assign({}, c);
+                if(clone.votes === undefined && clone.totVotes !== undefined) clone.votes = clone.totVotes;
+                if(clone.currentVotes === undefined && clone.currentTotVotes !== undefined) clone.currentVotes = clone.currentTotVotes;
+                return clone;
+            });
+            return null;
+        };
+        const addBlock = (label, className, cands, party) => {
+            if(!cands || cands.length === 0 || used.indexOf(cands) !== -1) return;
+            used.push(cands);
+            blocks.push({
+                label,
+                className,
+                cands: cands.map(c => party ? Object.assign({ party }, c) : Object.assign({}, c))
+            });
+        };
+        const demCands = getBlockCands(district.dem);
+        const repCands = getBlockCands(district.rep);
+        if(demCands && demCands.length !== 0){
+            addBlock("DEMOCRATIC PRIMARY", "primary-dem", demCands, "D");
+        }
+        if(repCands && repCands.length !== 0){
+            addBlock("REPUBLICAN PRIMARY", "primary-rep", repCands, "R");
+        }
+        const directCands = getBlockCands(district);
+        if(blocks.length === 0 && directCands && directCands.length !== 0){
+            addBlock("NONPARTISAN PRIMARY", "primary-nonpartisan", directCands, "");
+        }
+        if(blocks.length === 0){
+            Object.keys(district || {}).forEach(key => {
+                const value = district[key];
+                const cands = getBlockCands(value);
+                if(!cands || cands.length === 0) return;
+                const normalizedKey = normalizeRuleText(key);
+                if(normalizedKey.indexOf("dem") !== -1){
+                    addBlock("DEMOCRATIC PRIMARY", "primary-dem", cands, "D");
+                } else if(normalizedKey.indexOf("rep") !== -1){
+                    addBlock("REPUBLICAN PRIMARY", "primary-rep", cands, "R");
+                } else {
+                    const label = normalizedKey.indexOf("runoff") !== -1 ? "NONPARTISAN RUNOFF" : "NONPARTISAN PRIMARY";
+                    addBlock(label, "primary-nonpartisan", cands, "");
+                }
+            });
+        }
+        return blocks;
+    };
+
+    const isPrimaryDistrict = (district) => {
+        if(!district) return false;
+        if(district.dem || district.rep) return true;
+        const text = normalizeRuleText(`${district.category || ""} ${district.type || ""} ${district.electionType || ""} ${district.name || ""}`);
+        return text.indexOf("primary") !== -1;
     };
 
     const getHouseWinnerParty = (district, live) => {
         if(!district || !district.cands || district.cands.length === 0) return null;
         const cands = district.cands.slice().sort((a, b) => {
-            const av = safeNum(live ? a.currentVotes : a.votes);
-            const bv = safeNum(live ? b.currentVotes : b.votes);
+            const av = candidateVotes(a, live);
+            const bv = candidateVotes(b, live);
             return bv - av;
         });
         const winner = cands[0];
@@ -784,10 +1234,16 @@
             seats: { D: 0, R: 0, I: 0 },
             flips: { D: 0, R: 0, I: 0 },
             totalFlips: 0,
-            totalSeats: 0
+            totalSeats: 0,
+            votes: { D: 0, R: 0, I: 0 }
         };
 
         districts.forEach(district => {
+            if(district && district.cands){
+                district.cands.forEach(cand => {
+                    summary.votes[getHouseVotePartyKey(cand)] += candidateVotes(cand, live);
+                });
+            }
             if(calledOnly && district.pW !== true) return;
             const winnerParty = getHouseWinnerParty(district, live);
             if(!winnerParty) return;
@@ -814,6 +1270,77 @@
         return badge;
     };
 
+    const appendHousePrimaryComposition = (houseState, live) => {
+        const districts = houseState && houseState.districts ? houseState.districts : [];
+        const turnout = { D: 0, R: 0, I: 0 };
+        let primaryRaces = 0;
+
+        districts.forEach(district => {
+            if(!isPrimaryDistrict(district)) return;
+            primaryRaces++;
+            turnout.D += primaryPartyTotal(district.dem, live);
+            turnout.R += primaryPartyTotal(district.rep, live);
+            if(district.cands) turnout.I += primaryPartyTotal({ cands: district.cands }, live);
+        });
+
+        tooltipComponents.reporting.innerText = "PRIMARY RESULTS";
+        tooltipComponents.reporting.style.display = "block";
+
+        const metaLine = document.createElement("div");
+        metaLine.className = "bm-nbc-meta-line";
+        const seatNode = document.createElement("span");
+        seatNode.className = "bm-nbc-margin";
+        seatNode.innerText = `${primaryRaces}/${districts.length} HOUSE PRIMARIES`;
+        metaLine.appendChild(seatNode);
+        tooltipComponents.meta.appendChild(metaLine);
+
+        const rows = [
+            { party: "D", name: "Democratic Turnout", votes: turnout.D },
+            { party: "R", name: "Republican Turnout", votes: turnout.R },
+            { party: "I", name: "Nonpartisan Turnout", votes: turnout.I }
+        ].filter(row => row.votes > 0 || row.party !== "I");
+
+        const maxVotes = Math.max(1, ...rows.map(row => row.votes));
+        rows.forEach(rowInfo => {
+            const row = document.createElement("div");
+            row.className = "bm-nbc-row bm-house-row";
+            row.setAttribute("data-candidate-key", `house-primary:${rowInfo.party}`);
+
+            const party = document.createElement("div");
+            party.className = `bm-nbc-party party-${rowInfo.party.toLowerCase()}`;
+            party.innerText = rowInfo.party;
+            row.appendChild(party);
+
+            const name = document.createElement("div");
+            name.className = "bm-nbc-name";
+            name.innerText = rowInfo.name;
+            row.appendChild(name);
+
+            const votes = document.createElement("div");
+            votes.className = "bm-nbc-votes";
+            votes.innerText = formatNumber(rowInfo.votes);
+            row.appendChild(votes);
+
+            const pctWrap = document.createElement("div");
+            pctWrap.className = "bm-nbc-pct-wrap";
+            const pctNode = document.createElement("div");
+            pctNode.className = "bm-nbc-pct";
+            pctNode.innerText = "votes";
+            pctWrap.appendChild(pctNode);
+            const barTrack = document.createElement("div");
+            barTrack.className = "bm-nbc-bar-track";
+            const bar = document.createElement("div");
+            bar.className = "bm-nbc-bar";
+            bar.style.width = `${Math.max(4, Math.min(100, (rowInfo.votes / maxVotes) * 100))}%`;
+            const colour = rowInfo.party === "D" ? { h: 210, s: 100, l: 45 } : (rowInfo.party === "R" ? { h: 359, s: 100, l: 48 } : { h: 272, s: 78, l: 48 });
+            bar.style.backgroundColor = stringifyColour(colour);
+            barTrack.appendChild(bar);
+            pctWrap.appendChild(barTrack);
+            row.appendChild(pctWrap);
+            tooltipComponents.entries.appendChild(row);
+        });
+    };
+
     const appendHouseComposition = (houseState, live) => {
         const districts = houseState && houseState.districts ? houseState.districts : [];
         const called = { D: 0, R: 0, I: 0 };
@@ -835,28 +1362,18 @@
         tooltipComponents.reporting.innerText = `${totalCalled}/${districts.length} SEATS CALLED`;
         tooltipComponents.reporting.style.display = "block";
 
-        const metaLine = document.createElement("div");
-        metaLine.className = "bm-nbc-meta-line";
-        const seatNode = document.createElement("span");
-        seatNode.className = "bm-nbc-margin";
-        seatNode.innerText = "U.S. HOUSE DELEGATION";
-        metaLine.appendChild(seatNode);
-        tooltipComponents.meta.appendChild(metaLine);
-
-        const calledSummary = getHouseSeatSummary(districts, live, true);
-        const indicatorRow = document.createElement("div");
-        indicatorRow.className = "bm-nbc-indicators";
-        indicatorRow.appendChild(appendHouseMetricBadge(`FLIPS: ${calledSummary.totalFlips}`, "badge-flipped"));
-        if(calledSummary.flips.D > 0) indicatorRow.appendChild(appendHouseMetricBadge(`D +${calledSummary.flips.D}`, "badge-house-flip-d"));
-        if(calledSummary.flips.R > 0) indicatorRow.appendChild(appendHouseMetricBadge(`R +${calledSummary.flips.R}`, "badge-house-flip-r"));
-        if(calledSummary.flips.I > 0) indicatorRow.appendChild(appendHouseMetricBadge(`I +${calledSummary.flips.I}`, "badge-house-flip-i"));
-        tooltipComponents.meta.appendChild(indicatorRow);
+        const voteSummary = getHouseSeatSummary(districts, live, false);
 
         const rows = [
-            { party: "D", name: "Democrats", seats: called.D, leading: leading.D },
-            { party: "R", name: "Republicans", seats: called.R, leading: leading.R },
-            { party: "I", name: "Independents", seats: called.I, leading: leading.I }
-        ].filter(row => row.seats > 0 || row.leading > 0 || row.party !== "I");
+            { party: "D", name: "Democrats", seats: called.D, leading: leading.D, votes: voteSummary.votes.D },
+            { party: "R", name: "Republicans", seats: called.R, leading: leading.R, votes: voteSummary.votes.R },
+            { party: "I", name: "Independents", seats: called.I, leading: leading.I, votes: voteSummary.votes.I }
+        ].filter(row => row.seats > 0 || row.leading > 0 || row.party !== "I")
+            .sort((a, b) => {
+                if(b.seats !== a.seats) return b.seats - a.seats;
+                if(b.leading !== a.leading) return b.leading - a.leading;
+                return b.votes - a.votes;
+            });
 
         rows.forEach(rowInfo => {
             const row = document.createElement("div");
@@ -882,7 +1399,7 @@
             pctWrap.className = "bm-nbc-pct-wrap";
             const pctNode = document.createElement("div");
             pctNode.className = "bm-nbc-pct";
-            pctNode.innerText = live ? `${rowInfo.leading} leading` : `${rowInfo.seats} won`;
+            pctNode.innerText = formatNumber(rowInfo.votes);
             pctWrap.appendChild(pctNode);
 
             const barTrack = document.createElement("div");
@@ -989,19 +1506,26 @@
         }
 
         if(electionType === "usHouse" && currentDistrict.districts !== undefined){
-            appendHouseComposition(currentDistrict, live);
+            if(currentDistrict.districts.some(isPrimaryDistrict)) appendHousePrimaryComposition(currentDistrict, live);
+            else appendHouseComposition(currentDistrict, live);
             return;
         }
 
         if(currentDistrict.cands === undefined){
             tooltipComponents.reporting.innerText = "PRIMARY RESULTS";
+            tooltipComponents.reporting.style.display = "block";
             appendPrimaryRuleMeta(electionType, currentDistrict, districtId, live, countyView);
-            if(currentDistrict.dem && currentDistrict.dem.cands.length !== 0){
-                buildPartyPrimaryBlock("DEMOCRATIC PRIMARY", "primary-dem", currentDistrict.dem.cands.map(c => Object.assign({party: "D"}, c)), live);
-            }
-            if(currentDistrict.rep && currentDistrict.rep.cands.length !== 0){
-                buildPartyPrimaryBlock("REPUBLICAN PRIMARY", "primary-rep", currentDistrict.rep.cands.map(c => Object.assign({party: "R"}, c)), live);
-            }
+            getPrimaryBlocks(currentDistrict).forEach(block => buildPartyPrimaryBlock(block.label, block.className, block.cands, live, currentDistrict));
+            appendPrimaryTurnoutFooter(currentDistrict, live);
+            return;
+        }
+
+        if(isPrimaryDistrict(currentDistrict)){
+            tooltipComponents.reporting.innerText = "PRIMARY RESULTS";
+            tooltipComponents.reporting.style.display = "block";
+            appendPrimaryRuleMeta(electionType, currentDistrict, districtId, live, countyView);
+            getPrimaryBlocks(currentDistrict).forEach(block => buildPartyPrimaryBlock(block.label, block.className, block.cands, live, currentDistrict));
+            appendPrimaryTurnoutFooter(currentDistrict, live);
             return;
         }
 

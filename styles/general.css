@@ -685,13 +685,36 @@ td.winner-i {
 }
 .primary-dem { background: #0b65d8; }
 .primary-rep { background: #dc2626; }
+.primary-nonpartisan { background: #6d28d9; }
+
+.bm-nbc-turnout-footer {
+    padding: 9px 10px 10px;
+    border-top: 1px solid #c9d1dd;
+    color: #334155;
+    font-size: 12px;
+    font-weight: 900;
+    letter-spacing: .2px;
+    text-transform: uppercase;
+    background: #f8fafc;
+}
+
+.bm-nbc-more-candidates {
+    padding: 6px 9px;
+    border-top: 1px solid #c9d1dd;
+    color: #64748b;
+    font-size: 11px;
+    font-weight: 900;
+    letter-spacing: .3px;
+    text-transform: uppercase;
+    background: #f8fafc;
+}
 
 .bm-nbc-row {
     display: grid;
-    grid-template-columns: 34px minmax(120px, 1fr) 95px 120px;
+    grid-template-columns: 50px minmax(120px, 1fr) 95px 120px;
     align-items: center;
     gap: 8px;
-    min-height: 38px;
+    min-height: 62px;
     padding: 6px 10px;
     border-bottom: 1px solid #c9d1dd;
     background: #ffffff;
@@ -715,6 +738,67 @@ td.winner-i {
 .party-r { background: #dc2626; }
 .party-i { background: #525252; }
 
+.bm-nbc-portrait {
+    position: relative;
+    width: 42px;
+    height: 52px;
+    border-radius: 50% / 46%;
+    overflow: hidden;
+    border: 2px solid #f8fafc;
+    box-shadow: 0 0 0 2px #0f172a;
+    background: #525252;
+}
+
+.bm-nbc-portrait.party-d { background: #0b65d8; }
+.bm-nbc-portrait.party-r { background: #dc2626; }
+.bm-nbc-portrait.party-i { background: #525252; }
+
+.bm-nbc-portrait-img {
+    width: 100%;
+    height: 100%;
+    display: block;
+    object-fit: cover;
+    object-position: center 18%;
+}
+
+.bm-nbc-portrait-party {
+    display: none;
+    position: absolute;
+    left: -1px;
+    bottom: -1px;
+    min-width: 18px;
+    height: 18px;
+    padding: 0 3px;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid #ffffff;
+    color: #ffffff;
+    font-size: 11px;
+    line-height: 1;
+    font-weight: 950;
+}
+
+.party-d .bm-nbc-portrait-party { background: #0b65d8; }
+.party-r .bm-nbc-portrait-party { background: #dc2626; }
+.party-i .bm-nbc-portrait-party { background: #525252; }
+
+.bm-nbc-portrait.no-portrait {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.bm-nbc-portrait.no-portrait .bm-nbc-portrait-party {
+    display: inline-flex;
+    position: static;
+    min-width: 28px;
+    height: 28px;
+    border: 0;
+    background: transparent;
+    font-size: 16px;
+}
+
 .bm-nbc-name {
     font-size: 17px;
     font-weight: 900;
@@ -723,6 +807,24 @@ td.winner-i {
     overflow: hidden;
     text-overflow: ellipsis;
 }
+
+.bm-nbc-name-party {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 21px;
+    height: 21px;
+    margin-left: 14px;
+    color: #ffffff;
+    font-size: 12px;
+    line-height: 1;
+    font-weight: 950;
+    vertical-align: middle;
+}
+
+.bm-nbc-name-party.party-d { background: #0b65d8; }
+.bm-nbc-name-party.party-r { background: #dc2626; }
+.bm-nbc-name-party.party-i { background: #525252; }
 
 .bm-nbc-check {
     margin-left: 6px;
@@ -1051,16 +1153,16 @@ td.winner-i {
 
 /* live election-night motion */
 .bm-nbc-row {
-    transition: transform 520ms cubic-bezier(.16,.84,.24,1), background-color 360ms ease, box-shadow 360ms ease;
+    transition: transform 720ms cubic-bezier(.16,.84,.24,1), background-color 460ms ease, box-shadow 460ms ease;
     will-change: transform;
 }
 
 .bm-nbc-row.is-gaining-position {
-    animation: leadRowRise 820ms ease-out;
+    animation: leadRowRise 920ms ease-out;
 }
 
 .bm-nbc-bar {
-    transition: width 650ms cubic-bezier(.16,.84,.24,1), background-color 360ms ease;
+    transition: width 760ms cubic-bezier(.16,.84,.24,1), background-color 420ms ease;
 }
 
 .bm-nbc-votes,
@@ -1070,6 +1172,11 @@ td.winner-i {
 
 .bm-nbc-row.is-winner {
     animation: projectedWinnerGlow 900ms ease-out;
+}
+
+.bm-nbc-row.is-value-updated .bm-nbc-votes,
+.bm-nbc-row.is-value-updated .bm-nbc-pct {
+    animation: valuePulse 620ms ease-out;
 }
 
 .bm-house-row .bm-nbc-votes {
@@ -1082,6 +1189,129 @@ td.winner-i {
     white-space: nowrap;
 }
 
+/* v1.1 compact hover card: keep election details readable without covering the map */
+#better-maps-tooltip.nbc-tooltip-container,
+#better-maps-tooltip {
+    min-width: 360px !important;
+    width: min(430px, calc(100vw - 28px)) !important;
+    max-width: 430px !important;
+    max-height: min(520px, calc(100vh - 36px)) !important;
+    box-shadow: 5px 7px 0 rgba(0,0,0,.34), 0 0 14px rgba(0,0,0,.24) !important;
+}
+
+#better-maps-tooltip-network {
+    font-size: 11px !important;
+    padding: 5px 9px !important;
+    letter-spacing: 1.5px !important;
+}
+
+#better-maps-tooltip-header {
+    grid-template-columns: minmax(0, 1fr) auto !important;
+    gap: 8px !important;
+    padding: 8px 10px 7px !important;
+    border-bottom-width: 3px !important;
+}
+
+#better-maps-tooltip-title {
+    font-size: 20px !important;
+    min-width: 0 !important;
+    overflow: hidden !important;
+    text-overflow: ellipsis !important;
+    white-space: nowrap !important;
+}
+
+#better-maps-tooltip-reporting {
+    font-size: 11px !important;
+    padding: 4px 6px !important;
+}
+
+#better-maps-tooltip-meta {
+    padding: 6px 8px !important;
+}
+
+#better-maps-tooltip-entries {
+    max-height: none !important;
+    overflow-y: hidden !important;
+    overflow-x: hidden !important;
+}
+
+.bm-nbc-primary-header {
+    font-size: 12px !important;
+    padding: 6px 9px !important;
+}
+
+.bm-nbc-turnout-footer {
+    padding: 7px 9px 8px !important;
+    font-size: 11px !important;
+}
+
+.bm-nbc-more-candidates {
+    padding: 6px 9px !important;
+    font-size: 10px !important;
+}
+
+.bm-nbc-row {
+    grid-template-columns: 42px minmax(92px, 1fr) 76px 92px !important;
+    gap: 7px !important;
+    min-height: 52px !important;
+    padding: 5px 9px !important;
+}
+
+.bm-nbc-portrait {
+    width: 34px !important;
+    height: 42px !important;
+    border-width: 2px !important;
+}
+
+.bm-nbc-portrait.no-portrait .bm-nbc-portrait-party {
+    min-width: 24px !important;
+    height: 24px !important;
+    font-size: 14px !important;
+}
+
+.bm-nbc-name {
+    font-size: 14px !important;
+}
+
+.bm-nbc-name-party {
+    width: 18px !important;
+    height: 18px !important;
+    margin-left: 9px !important;
+    font-size: 10px !important;
+}
+
+.bm-nbc-incumbent {
+    margin-left: 6px !important;
+    padding: 1px 4px !important;
+    font-size: 0.48em !important;
+}
+
+.bm-nbc-check {
+    width: 18px !important;
+    height: 18px !important;
+    font-size: 19px !important;
+}
+
+.bm-nbc-votes {
+    font-size: 13px !important;
+}
+
+.bm-nbc-pct {
+    font-size: 15px !important;
+}
+
+.bm-nbc-bar-track {
+    height: 4px !important;
+}
+
+.bm-house-row .bm-nbc-votes {
+    font-size: 13px !important;
+}
+
+.bm-house-row .bm-nbc-pct {
+    font-size: 12px !important;
+}
+
 @keyframes leadRowRise {
     0% { box-shadow: inset 0 0 0 #ffd400, 0 0 0 rgba(255,212,0,0); }
     35% { box-shadow: inset 4px 0 0 #ffd400, 0 0 18px rgba(255,212,0,.45); }
@@ -1092,4 +1322,10 @@ td.winner-i {
     0% { box-shadow: inset 0 0 0 #ffd400, 0 0 0 rgba(255,212,0,0); }
     40% { box-shadow: inset 5px 0 0 #ffd400, 0 0 20px rgba(255,212,0,.5); }
     100% { box-shadow: inset 4px 0 0 #ffd400, 0 0 0 rgba(255,212,0,0); }
+}
+
+@keyframes valuePulse {
+    0% { transform: translateY(2px); opacity: .55; }
+    45% { transform: translateY(-1px); opacity: 1; color: #ffd400; }
+    100% { transform: translateY(0); opacity: 1; }
 }

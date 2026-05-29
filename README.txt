@@ -1,5 +1,5 @@
 PoliticalJunkin's Election Night Overhaul
-Version 1.0
+Version 1.1
 Author: PoliticalJunkin
 
 PoliticalJunkin's Election Night Overhaul is an NW/Executive mod for The Political Process that upgrades election-night map visuals while preserving the game's original county election engine.

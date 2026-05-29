@@ -168,7 +168,7 @@
         return 0.72;
     };
 
-    const getCandidateVotes = (cand, live) => safeNum(live ? cand.currentVotes : cand.votes);
+    const getCandidateVotes = (cand, live) => safeNum(live ? cand.currentVotes : cand.votes, safeNum(cand.votes));
 
     const getPartyKey = (cand) => {
         if(!cand) return "";
@@ -276,6 +276,18 @@
         }
     };
 
+    const getMunicipalityReportingRatio = (muniId, meta, source, live) => {
+        if(!live || !source) return 1;
+        const statewideRatio = Math.max(0, Math.min(1, safeNum(source.reportingRatio, 1)));
+        if(statewideRatio >= 0.999) return 1;
+
+        const turnoutWeight = Math.max(0.35, Math.min(2.4, safeNum(meta.turnoutWeight, 1)));
+        const sizeDelay = Math.max(-0.10, Math.min(0.22, (turnoutWeight - 1) * 0.18));
+        const hash = String(muniId || "").split("").reduce((sum, char) => sum + char.charCodeAt(0), 0);
+        const jitter = ((hash % 19) - 9) / 100;
+        return Math.max(0, Math.min(0.99, statewideRatio - sizeDelay + jitter));
+    };
+
     const getMunicipalitySyntheticDistrict = (muniId, electionType, live) => {
         const stateKey = String(activeMap || "").toUpperCase();
         const stateData = municipalityShiftData[stateKey];
@@ -298,7 +310,7 @@
         const demVotes = hasDemocrat ? Math.floor(turnout * demShare) : 0;
         const repVotes = Math.floor(turnout * repShare);
         const indVotes = Math.floor(turnout * finalIndShare);
-        const reportingRatio = (!live || !source) ? 1 : Math.max(0, Math.min(1, source.reportingRatio));
+        const reportingRatio = getMunicipalityReportingRatio(muniId, meta, source, live);
         const currentTurnout = Math.floor(turnout * reportingRatio);
         const demCurrentVotes = Math.floor(demVotes * reportingRatio);
         const repCurrentVotes = Math.floor(repVotes * reportingRatio);
@@ -318,7 +330,7 @@
             name: meta.displayName || muniId,
             totalVotes: turnout,
             totalCurrVotes: currentTurnout,
-            pW: !live || reportingRatio >= 1,
+            pW: !live || reportingRatio >= 0.999,
             cands
         };
     };
@@ -326,12 +338,12 @@
 
     const getRaceInfo = (district, live) => {
         const sortedCands = district.cands.slice().sort((cand1, cand2) => {
-            if(live) return cand2.currentVotes - cand1.currentVotes;
+            if(live) return getCandidateVotes(cand2, true) - getCandidateVotes(cand1, true);
             return cand2.votes - cand1.votes;
         });
 
-        const topVotes = live ? sortedCands[0].currentVotes : sortedCands[0].votes;
-        const secondVotes = (sortedCands[1] !== undefined) ? (live ? sortedCands[1].currentVotes : sortedCands[1].votes) : 0;
+        const topVotes = getCandidateVotes(sortedCands[0], live);
+        const secondVotes = (sortedCands[1] !== undefined) ? getCandidateVotes(sortedCands[1], live) : 0;
 
         const info = {
             currentLeader: sortedCands[0],
@@ -656,6 +668,11 @@
     };
 
     const getCanvasDimension = (canvasElem, attrName, fallback) => {
+        const rect = canvasElem.getBoundingClientRect ? canvasElem.getBoundingClientRect() : null;
+        const rectValue = rect ? (attrName === "width" ? rect.width : rect.height) : NaN;
+        if(Number.isFinite(rectValue) && rectValue > 0) return rectValue;
+        const clientValue = attrName === "width" ? canvasElem.clientWidth : canvasElem.clientHeight;
+        if(Number.isFinite(clientValue) && clientValue > 0) return clientValue;
         const attrValue = canvasElem.getAttribute(attrName);
         const parsedAttr = attrValue ? parseFloat(attrValue) : NaN;
         if(Number.isFinite(parsedAttr) && parsedAttr > 0) return parsedAttr;
